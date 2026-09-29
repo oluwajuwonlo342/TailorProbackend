@@ -13,7 +13,7 @@ const app = express();
 // Security Middleware 
 app.use(helmet()); 
 app.use(cors({ 
-  origin: ['http://localhost:5173', 'http://localhost:5174'], 
+  origin: ['https://tailorpro-lpnb.onrender.com/'], 
   credentials: true 
 })); 
 app.use(express.json({ limit: '10kb' })); 
