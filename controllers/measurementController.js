@@ -28,7 +28,6 @@ exports.verifyPublicLink = async (req, res) => {
 // Handle the form submission from the public link
 exports.submitPublicMeasurement = async (req, res) => {
   try {
-    // The customer ID is passed securely in the URL token
     const customerId = req.params.token; 
     const customer = await Customer.findById(customerId);
     
@@ -36,29 +35,33 @@ exports.submitPublicMeasurement = async (req, res) => {
       return res.status(404).json({ error: 'Invalid or expired link.' });
     }
 
-    const { subProfileId, targetType, measurementsData, unit, gender } = req.body;
+    // 1. Pull out the routing data, and capture EVERYTHING else as flat measurements
+    const { subProfileId, targetType, unit, gender, measurementsData, ...flatMeasurements } = req.body;
+
+    // 2. Automatically detect where the numbers are (nested vs flat)
+    const finalMeasurements = (measurementsData && Object.keys(measurementsData).length > 0) 
+      ? measurementsData 
+      : flatMeasurements;
 
     if (targetType === 'subProfile' && subProfileId) {
       const subProfile = customer.subProfiles.id(subProfileId);
       if (subProfile) {
-        // FIXED: Pushing the new measurement into the array safely
         subProfile.measurements.push({
           title: 'WhatsApp Self-Measurement',
           unit: unit || 'inches',
-          ...measurementsData
+          ...finalMeasurements
         });
         subProfile.gender = gender || subProfile.gender;
         await customer.save();
       }
     } else {
-      // FIXED: Safely spreading the measurement data into the new record
       await Measurement.create({
         customer: customerId,
         user: customer.user, 
         unit: unit || 'inches',
         gender: customer.gender,
         title: 'WhatsApp Self-Measurement',
-        ...measurementsData
+        ...finalMeasurements
       });
     }
 
@@ -67,9 +70,7 @@ exports.submitPublicMeasurement = async (req, res) => {
     console.error("PUBLIC SUBMISSION ERROR:", error);
     res.status(500).json({ error: 'Failed to submit measurements. Please try again.' });
   }
-};
-
-// ==========================================================
+};// ==========================================================
 // SECURE DASHBOARD CONTROLLERS (Tailor Logged In)
 // ==========================================================
 
