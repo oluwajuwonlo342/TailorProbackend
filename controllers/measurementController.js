@@ -41,19 +41,24 @@ exports.submitPublicMeasurement = async (req, res) => {
     if (targetType === 'subProfile' && subProfileId) {
       const subProfile = customer.subProfiles.id(subProfileId);
       if (subProfile) {
-        subProfile.measurements = measurementsData;
+        // FIXED: Pushing the new measurement into the array safely
+        subProfile.measurements.push({
+          title: 'WhatsApp Self-Measurement',
+          unit: unit || 'inches',
+          ...measurementsData
+        });
         subProfile.gender = gender || subProfile.gender;
         await customer.save();
       }
     } else {
-      // Create standard measurement record
+      // FIXED: Safely spreading the measurement data into the new record
       await Measurement.create({
-        ...measurementsData,
         customer: customerId,
-        user: customer.user, // Assign to the tailor
-        unit,
+        user: customer.user, 
+        unit: unit || 'inches',
         gender: customer.gender,
-        title: 'Client Self-Measurement Form'
+        title: 'WhatsApp Self-Measurement',
+        ...measurementsData
       });
     }
 
