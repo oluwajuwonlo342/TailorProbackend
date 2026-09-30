@@ -23,7 +23,7 @@ router.get('/dashboard-stats', protect, async (req, res) => {
     const totalTailors = await User.countDocuments({ role: 'user' });
     const activeSubscriptions = await User.countDocuments({ subscriptionStatus: 'pro' });
     
-    const PRO_PLAN_PRICE = 5000;
+    const PRO_PLAN_PRICE = 3500;
     const revenue = activeSubscriptions * PRO_PLAN_PRICE;
 
     // NEW: Fetch the 5 most recently registered tailors
