@@ -43,11 +43,8 @@ exports.submitPublicMeasurement = async (req, res) => {
       ? measurementsData
       : flatMeasurements;
 
-    // 3. Guard against empty/blank submissions creating a ghost record
-    const hasAnyValue = Object.values(finalMeasurements).some(
-      (v) => v !== undefined && v !== null && v !== ''
-    );
-    if (!hasAnyValue) {
+    // 3. Guard against empty submissions (e.g. network retry with no body)
+    if (!finalMeasurements || Object.keys(finalMeasurements).length === 0) {
       return res.status(400).json({ error: 'No measurement values were submitted.' });
     }
 
@@ -56,12 +53,12 @@ exports.submitPublicMeasurement = async (req, res) => {
       if (!subProfile) {
         return res.status(404).json({ error: 'Sub-profile not found.' });
       }
+
       subProfile.measurements.push({
         title: 'WhatsApp Self-Measurement',
         unit: unit || 'inches',
         ...finalMeasurements
       });
-      // Use the gender the form was filled out for, fall back to what's already stored
       subProfile.gender = gender || subProfile.gender;
       await customer.save();
     } else {
@@ -69,9 +66,8 @@ exports.submitPublicMeasurement = async (req, res) => {
         customer: customerId,
         user: customer.user,
         unit: unit || 'inches',
-        // Use the gender the form was actually submitted with, not just the
-        // customer's stored gender, so the right measurement fields line up
-        // when CustomerProfile.jsx decides which block (Male/Female) to render.
+        // Use the gender the form was actually filled out for (Male/Female field set),
+        // falling back to the customer's stored gender only if the form didn't send one
         gender: gender || customer.gender,
         title: 'WhatsApp Self-Measurement',
         ...finalMeasurements
@@ -114,25 +110,20 @@ exports.saveCustomerMeasurements = async (req, res) => {
       return res.status(404).json({ error: 'Customer not found.' });
     }
 
-    // Destructure and strip out _id to prevent duplicate key errors when creating a new history log
-    const { _id, ...measurementData } = req.body;
+    // Strip out routing/meta fields before checking whether anything real was submitted
+    const { _id, title, unit, gender, recordedDate, createdAt, updatedAt, notes, ...measurementValues } = req.body;
 
-    // Guard against saving a completely empty record (e.g. tailor clicks Save
-    // without entering any values) — this is what produced ghost
-    // "Standard Measurement" records with no data in them.
-    const { title, unit, ...numericFields } = measurementData;
-    const hasAnyValue = Object.values(numericFields).some(
+    const hasAtLeastOneValue = Object.values(measurementValues).some(
       (v) => v !== undefined && v !== null && v !== ''
     );
-    if (!hasAnyValue) {
-      return res.status(400).json({ error: 'Please enter at least one measurement before saving.' });
+    if (!hasAtLeastOneValue) {
+      return res.status(400).json({ error: 'Please fill in at least one measurement before saving.' });
     }
 
     // Check if customer already has a measurement record
     const existingCount = await Measurement.countDocuments({ customer: customerId, user: req.user._id });
 
     if (existingCount > 0) {
-      // Check if user is on Pro plan or active Trial
       const user = await User.findById(req.user._id);
       const isPro = user.plan?.toLowerCase() === 'pro' || (user.trialEnd && new Date(user.trialEnd) > new Date());
 
@@ -143,12 +134,14 @@ exports.saveCustomerMeasurements = async (req, res) => {
       }
     }
 
-    // Create a brand new measurement history entry with a fresh _id
     const newMeasurement = await Measurement.create({
-      ...measurementData,
+      title,
+      unit,
+      gender: gender || customer.gender,
+      notes,
+      ...measurementValues,
       customer: customerId,
-      user: req.user._id,
-      gender: customer.gender
+      user: req.user._id
     });
 
     res.status(201).json({
