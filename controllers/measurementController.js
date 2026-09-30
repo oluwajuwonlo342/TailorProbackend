@@ -2,6 +2,72 @@ const Measurement = require('../models/Measurement');
 const Customer = require('../models/Customer');
 const User = require('../models/User');
 
+// ==========================================================
+// PUBLIC LINK CONTROLLERS (For WhatsApp Shared Links)
+// ==========================================================
+
+// Verify the public link and get basic customer/tailor info
+exports.verifyPublicLink = async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.token).populate('user', 'businessName fullName');
+    if (!customer) {
+      return res.status(404).json({ error: 'Invalid or expired link.' });
+    }
+    
+    res.status(200).json({ 
+      success: true, 
+      customer, 
+      tailorName: customer.user.businessName || customer.user.fullName 
+    });
+  } catch (error) {
+    console.error("PUBLIC LINK VERIFICATION ERROR:", error);
+    res.status(404).json({ error: 'Invalid or expired link.' });
+  }
+};
+
+// Handle the form submission from the public link
+exports.submitPublicMeasurement = async (req, res) => {
+  try {
+    // The customer ID is passed securely in the URL token
+    const customerId = req.params.token; 
+    const customer = await Customer.findById(customerId);
+    
+    if (!customer) {
+      return res.status(404).json({ error: 'Invalid or expired link.' });
+    }
+
+    const { subProfileId, targetType, measurementsData, unit, gender } = req.body;
+
+    if (targetType === 'subProfile' && subProfileId) {
+      const subProfile = customer.subProfiles.id(subProfileId);
+      if (subProfile) {
+        subProfile.measurements = measurementsData;
+        subProfile.gender = gender || subProfile.gender;
+        await customer.save();
+      }
+    } else {
+      // Create standard measurement record
+      await Measurement.create({
+        ...measurementsData,
+        customer: customerId,
+        user: customer.user, // Assign to the tailor
+        unit,
+        gender: customer.gender,
+        title: 'Client Self-Measurement Form'
+      });
+    }
+
+    res.status(201).json({ success: true, message: 'Measurements submitted successfully.' });
+  } catch (error) {
+    console.error("PUBLIC SUBMISSION ERROR:", error);
+    res.status(500).json({ error: 'Failed to submit measurements. Please try again.' });
+  }
+};
+
+// ==========================================================
+// SECURE DASHBOARD CONTROLLERS (Tailor Logged In)
+// ==========================================================
+
 // Get all measurement history records for a specific customer
 exports.getCustomerMeasurements = async (req, res) => {
   try {
@@ -9,7 +75,7 @@ exports.getCustomerMeasurements = async (req, res) => {
     const customer = await Customer.findOne({ _id: customerId, user: req.user._id });
     if (!customer) return res.status(404).json({ error: 'Customer not found.' });
 
-    const measurements = await Measurement.find({ customer: customerId, user: req.user._id }).sort('-recordedDate');
+    const measurements = await Measurement.find({ customer: customerId, user: req.user._id }).sort('-createdAt');
     res.status(200).json({ status: 'success', results: measurements.length, data: measurements });
   } catch (error) {
     console.error("GET MEASUREMENTS ERROR:", error);
@@ -17,6 +83,7 @@ exports.getCustomerMeasurements = async (req, res) => {
   }
 };
 
+// Save measurement history directly from the dashboard
 exports.saveCustomerMeasurements = async (req, res) => {
   try {
     const { customerId } = req.params;
@@ -32,7 +99,7 @@ exports.saveCustomerMeasurements = async (req, res) => {
     if (existingCount > 0) {
       // Check if user is on Pro plan or active Trial
       const user = await User.findById(req.user._id);
-      const isPro = user.plan === 'Pro' || (user.trialEnd && new Date(user.trialEnd) > new Date());
+      const isPro = user.plan?.toLowerCase() === 'pro' || (user.trialEnd && new Date(user.trialEnd) > new Date());
       
       if (!isPro) {
         return res.status(403).json({ 
@@ -59,36 +126,5 @@ exports.saveCustomerMeasurements = async (req, res) => {
   } catch (error) {
     console.error("SAVE MEASUREMENTS ERROR:", error);
     res.status(400).json({ error: error.message || 'Failed to save measurements.' });
-  }
-};
-// Public submission handler for WhatsApp shared links
-exports.submitPublicMeasurements = async (req, res) => {
-  try {
-    const { customerId, subProfileId, targetType, measurementsData, unit, gender } = req.body;
-    const customer = await Customer.findById(customerId);
-    if (!customer) return res.status(404).json({ error: 'Customer not found.' });
-
-    if (targetType === 'subProfile' && subProfileId) {
-      const subProfile = customer.subProfiles.id(subProfileId);
-      if (subProfile) {
-        subProfile.measurements = measurementsData;
-        subProfile.gender = gender || subProfile.gender;
-        await customer.save();
-      }
-    } else {
-      await Measurement.create({
-        ...measurementsData,
-        customer: customerId,
-        user: customer.user,
-        unit,
-        gender: customer.gender,
-        title: 'WhatsApp Form Submission'
-      });
-    }
-
-    res.status(200).json({ status: 'success', message: 'Measurements submitted successfully.' });
-  } catch (error) {
-    console.error("PUBLIC SUBMISSION ERROR:", error);
-    res.status(500).json({ error: 'Server Error' });
   }
 };
