@@ -5,8 +5,73 @@ const Measurement = require('../models/Measurement');
 const Customer = require('../models/Customer');
 const User = require('../models/User');
 
-// Protect all measurement routes
+// ==========================================================
+// 1. PUBLIC ROUTES (MUST GO BEFORE THE PROTECT MIDDLEWARE)
+// ==========================================================
+
+// GET: Verify public link and fetch basic customer/tailor info
+router.get('/public/:token', async (req, res) => {
+  try {
+    // Treat the token as the customerId to look up the customer
+    const customer = await Customer.findById(req.params.token).populate('user', 'businessName fullName');
+    
+    if (!customer) {
+      return res.status(404).json({ error: 'Invalid or expired link.' });
+    }
+    
+    res.status(200).json({ 
+      success: true, 
+      customer, 
+      tailorName: customer.user.businessName || customer.user.fullName 
+    });
+  } catch (error) {
+    console.error("PUBLIC LINK GET ERROR:", error);
+    // Return 404 so the frontend shows the "Invalid Link" UI instead of crashing
+    res.status(404).json({ error: 'Invalid or expired link.' });
+  }
+});
+
+// POST: Save measurements submitted by the customer
+router.post('/public/:token', async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.token);
+    
+    if (!customer) {
+      return res.status(404).json({ error: 'Invalid or expired link.' });
+    }
+
+    // Strip out any potentially conflicting _id from the body
+    const { _id, ...measurementData } = req.body;
+
+    // Create the measurement assigned to the correct customer and tailor
+    const newMeasurement = await Measurement.create({
+      ...measurementData,
+      customer: customer._id,
+      user: customer.user, // Important: assign it to the tailor who owns the customer
+      gender: customer.gender
+    });
+
+    res.status(201).json({ 
+      success: true, 
+      message: 'Measurements submitted successfully!',
+      data: newMeasurement
+    });
+  } catch (error) {
+    console.error("PUBLIC LINK POST ERROR:", error);
+    res.status(400).json({ error: 'Failed to submit measurements. Please check your inputs.' });
+  }
+});
+
+
+// ==========================================================
+// 2. AUTH MIDDLEWARE (LOCKS DOWN EVERYTHING BELOW THIS LINE)
+// ==========================================================
 router.use(protect);
+
+
+// ==========================================================
+// 3. SECURE DASHBOARD ROUTES
+// ==========================================================
 
 // GET: Fetch all measurement history records for a specific customer
 router.get('/customer/:customerId', async (req, res) => {
@@ -49,7 +114,7 @@ router.post('/customer/:customerId', async (req, res) => {
     if (existingCount > 0) {
       // Check if user is on Pro plan or active trial
       const user = await User.findById(req.user._id);
-      const isPro = user.plan === 'Pro' || (user.trialEnd && new Date(user.trialEnd) > new Date());
+      const isPro = user.plan === 'Pro' || user.plan === 'pro' || (user.trialEnd && new Date(user.trialEnd) > new Date());
       
       if (!isPro) {
         return res.status(403).json({ 
