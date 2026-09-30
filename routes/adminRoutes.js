@@ -207,7 +207,7 @@ router.get('/subscriptions', protect, async (req, res) => {
     const totalFree = await User.countDocuments({ plan: 'free', role: 'user' });
     
     // Assuming PRO plan costs ₦5,000/month
-    const PRO_PLAN_PRICE = 5000; 
+    const PRO_PLAN_PRICE = 3500; 
     const monthlyRevenue = totalPro * PRO_PLAN_PRICE;
 
     // 2. Fetch the list of tailors with their correct subscription fields
@@ -273,7 +273,7 @@ router.get('/overview', protect, async (req, res) => {
     // 1. Calculate top-level metrics
     const totalTailors = await User.countDocuments({ role: 'user' });
     const proTailors = await User.countDocuments({ role: 'user', plan: 'pro' });
-    const mrr = proTailors * 5000; // ₦5,000/month PRO plan
+    const mrr = proTailors * 3500; // ₦5,000/month PRO plan
 
     // 2. Fetch the 5 most recent registrations
     const recentTailors = await User.find({ role: 'user' })
