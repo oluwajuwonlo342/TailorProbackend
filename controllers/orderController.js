@@ -18,8 +18,7 @@ exports.getOrders = async (req, res) => {
     res.status(500).json({ error: 'Server Error' });
   }
 };
-
-// Create a new order
+// Inside your backend createOrder controller:
 exports.createOrder = async (req, res) => {
   try {
     const { customerId, subProfileId, outfitName, fabricDescription, totalAmount, amountPaid, dueDate, notes } = req.body;
@@ -29,10 +28,14 @@ exports.createOrder = async (req, res) => {
       return res.status(404).json({ error: 'Customer not found.' });
     }
 
+    // Generate a unique order number if required by your schema
+    const generatedOrderNumber = `ORD-${Date.now().toString().slice(-6)}`;
+
     const newOrder = await Order.create({
       user: req.user._id,
       customer: customerId,
       subProfileId: subProfileId || null,
+      orderNumber: generatedOrderNumber, // <--- Add this line
       outfitName,
       fabricDescription,
       totalAmount,
@@ -50,7 +53,6 @@ exports.createOrder = async (req, res) => {
     res.status(400).json({ error: error.message || 'Failed to create order.' });
   }
 };
-
 // Update order status or payment
 exports.updateOrder = async (req, res) => {
   try {
