@@ -95,7 +95,7 @@ router.post('/:id/sub-profiles', async (req, res) => {
   }
 });
 
-// PUT: Save a new measurement record to a sub-profile's history array (Fixed with _id stripping)
+// PUT: Save a NEW measurement record to a sub-profile's history array (prepends)
 router.put('/:id/sub-profiles/:subId/measurements', async (req, res) => {
   try {
     const customer = await Customer.findOne({ _id: req.params.id, user: req.user._id });
@@ -124,6 +124,50 @@ router.put('/:id/sub-profiles/:subId/measurements', async (req, res) => {
   } catch (error) {
     console.error("SAVE SUB-PROFILE MEASUREMENT ERROR:", error);
     res.status(400).json({ error: 'Failed to save sub-profile measurements.' });
+  }
+});
+
+// PUT: Update an EXISTING measurement record within a sub-profile's history (edit, not a new entry)
+router.put('/:id/sub-profiles/:subId/measurements/:measurementId', async (req, res) => {
+  try {
+    const customer = await Customer.findOne({ _id: req.params.id, user: req.user._id });
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const subProfile = customer.subProfiles.id(req.params.subId);
+    if (!subProfile) {
+      return res.status(404).json({ error: 'Sub-profile not found' });
+    }
+
+    const index = subProfile.measurements.findIndex(
+      (m) => String(m._id) === req.params.measurementId
+    );
+    if (index === -1) {
+      return res.status(404).json({ error: 'Measurement record not found' });
+    }
+
+    const existing = subProfile.measurements[index];
+    const { _id, createdAt, updatedAt, recordedDate, ...incoming } = req.body;
+
+    // Build a fresh record from only what was submitted, so a part removed
+    // in the edit form is actually dropped — not left stale alongside new ones.
+    const updatedRecord = {
+      _id: existing._id,
+      recordedDate: existing.recordedDate,
+      ...incoming
+    };
+
+    // splice is a tracked array method in Mongoose, so this correctly
+    // marks the change for saving (unlike mutating the subdoc directly).
+    subProfile.measurements.splice(index, 1, updatedRecord);
+
+    await customer.save();
+
+    res.status(200).json({ status: 'success', data: customer });
+  } catch (error) {
+    console.error("UPDATE SUB-PROFILE MEASUREMENT ERROR:", error);
+    res.status(400).json({ error: 'Failed to update sub-profile measurement.' });
   }
 });
 
