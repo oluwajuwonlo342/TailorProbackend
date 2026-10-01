@@ -1,25 +1,22 @@
 const mongoose = require('mongoose');
 
+// strict: false lets this subdocument store any dynamic measurement
+// part the user types (e.g. "Bust", "Gown Length") in addition to the
+// explicitly declared fields below. Without this, Mongoose silently
+// drops any key not declared on the schema.
+const subMeasurementSchema = new mongoose.Schema({
+  title: { type: String, default: 'Standard Fitting' },
+  recordedDate: { type: Date, default: Date.now },
+  unit: { type: String, enum: ['inches', 'cm'], default: 'inches' },
+  notes: String
+}, { strict: false, timestamps: true });
+
 const subProfileSchema = new mongoose.Schema({
   name: { type: String, required: true },
   relationship: { type: String, required: true }, // Son, Daughter, Spouse, etc.
   gender: { type: String, enum: ['Male', 'Female'], required: true },
   notes: { type: String },
-  // Change measurements from a single sub-object to an array of chronological measurement logs
-  measurements: [{
-    title: { type: String, default: 'Standard Fitting' },
-    recordedDate: { type: Date, default: Date.now },
-    unit: { type: String, enum: ['inches', 'cm'], default: 'inches' },
-    // Top measurements
-    neck: Number, shoulder: Number, chest: Number, waist: Number, armHole: Number, 
-    sleeveLength: Number, bicep: Number, wrist: Number, topLength: Number,
-    bust: Number, underBust: Number, shoulderToNipple: Number, shoulderToUnderBust: Number, 
-    halfLength: Number, gownLength: Number,
-    // Bottom measurements
-    trouserWaist: Number, hips: Number, thigh: Number, knee: Number, calf: Number, 
-    instep: Number, trouserLength: Number, inseam: Number, skirtLength: Number,
-    notes: String
-  }]
+  measurements: [subMeasurementSchema]
 }, { timestamps: true });
 
 const customerSchema = new mongoose.Schema({
@@ -52,7 +49,7 @@ const customerSchema = new mongoose.Schema({
   notes: {
     type: String
   },
-  subProfiles: [subProfileSchema] // <--- Added Sub-Profiles Array here!
+  subProfiles: [subProfileSchema]
 }, { timestamps: true });
 
 module.exports = mongoose.model('Customer', customerSchema);
