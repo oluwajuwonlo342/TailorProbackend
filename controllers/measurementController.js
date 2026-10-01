@@ -99,7 +99,6 @@ exports.getCustomerMeasurements = async (req, res) => {
     res.status(500).json({ error: 'Server Error' });
   }
 };
-
 // Save measurement history directly from the dashboard
 exports.saveCustomerMeasurements = async (req, res) => {
   try {
@@ -110,13 +109,19 @@ exports.saveCustomerMeasurements = async (req, res) => {
       return res.status(404).json({ error: 'Customer not found.' });
     }
 
-    // Strip out routing/meta fields before checking whether anything real was submitted
-    const { _id, title, unit, gender, recordedDate, createdAt, updatedAt, notes, ...measurementValues } = req.body;
+    // Pull out known fields, allowing any extra fields to be captured dynamically
+    const { _id, title, unit, gender, recordedDate, createdAt, updatedAt, notes, measurementsData, ...dynamicFields } = req.body;
 
-    const hasAtLeastOneValue = Object.values(measurementValues).some(
+    // Combine any existing measurementsData with any flat dynamic fields submitted
+    const finalMeasurementsData = {
+      ...(measurementsData || {}),
+      ...dynamicFields
+    };
+
+    const hasAtLeastOneValue = Object.values(finalMeasurementsData).some(
       (v) => v !== undefined && v !== null && v !== ''
     );
-    if (!hasAtLeastOneValue) {
+    if (!hasAtLeastOneValue && !title && !notes) {
       return res.status(400).json({ error: 'Please fill in at least one measurement before saving.' });
     }
 
@@ -139,7 +144,7 @@ exports.saveCustomerMeasurements = async (req, res) => {
       unit,
       gender: gender || customer.gender,
       notes,
-      ...measurementValues,
+      measurementsData: finalMeasurementsData,
       customer: customerId,
       user: req.user._id
     });
