@@ -99,6 +99,7 @@ exports.getCustomerMeasurements = async (req, res) => {
     res.status(500).json({ error: 'Server Error' });
   }
 };
+
 // Save measurement history directly from the dashboard
 exports.saveCustomerMeasurements = async (req, res) => {
   try {
@@ -156,5 +157,57 @@ exports.saveCustomerMeasurements = async (req, res) => {
   } catch (error) {
     console.error("SAVE MEASUREMENTS ERROR:", error);
     res.status(400).json({ error: error.message || 'Failed to save measurements.' });
+  }
+};
+
+// Update an EXISTING measurement record in place (edit, not a new history entry)
+exports.updateCustomerMeasurement = async (req, res) => {
+  try {
+    const { measurementId } = req.params;
+
+    const measurement = await Measurement.findOne({ _id: measurementId, user: req.user._id });
+    if (!measurement) {
+      return res.status(404).json({ error: 'Measurement record not found.' });
+    }
+
+    const { _id, customer, user, createdAt, updatedAt, recordedDate, measurementsData, title, unit, gender, notes, ...dynamicFields } = req.body;
+
+    const finalMeasurementsData = {
+      ...(measurementsData || {}),
+      ...dynamicFields
+    };
+
+    const hasAtLeastOneValue = Object.values(finalMeasurementsData).some(
+      (v) => v !== undefined && v !== null && v !== ''
+    );
+    if (!hasAtLeastOneValue) {
+      return res.status(400).json({ error: 'Please fill in at least one measurement before saving.' });
+    }
+
+    if (title) measurement.title = title;
+    if (unit) measurement.unit = unit;
+    if (notes !== undefined) measurement.notes = notes;
+
+    // Replace the measurementsData object entirely (rather than merging) so
+    // a part removed in the edit form is actually dropped from the record.
+    measurement.measurementsData = finalMeasurementsData;
+
+    // Clear any legacy top-level predefined fields (neck, shoulder, etc.) left over
+    // from the old hardcoded form, so an edit fully replaces old data cleanly.
+    const predefinedKeys = [
+      'neck', 'shoulder', 'chest', 'waist', 'armHole', 'sleeveLength', 'bicep', 'wrist', 'topLength',
+      'bust', 'underBust', 'shoulderToNipple', 'shoulderToUnderBust', 'halfLength', 'gownLength',
+      'trouserWaist', 'hips', 'thigh', 'knee', 'calf', 'instep', 'trouserLength', 'inseam', 'skirtLength'
+    ];
+    predefinedKeys.forEach((key) => {
+      measurement.set(key, undefined);
+    });
+
+    await measurement.save();
+
+    res.status(200).json({ status: 'success', data: measurement });
+  } catch (error) {
+    console.error("UPDATE MEASUREMENT ERROR:", error);
+    res.status(400).json({ error: error.message || 'Failed to update measurement.' });
   }
 };
