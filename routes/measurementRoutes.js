@@ -6,6 +6,7 @@ const {
   submitPublicMeasurement,
   getCustomerMeasurements,
   saveCustomerMeasurements,
+  updateCustomerMeasurement,
 } = require('../controllers/measurementController');
 
 // ==========================================================
@@ -26,5 +27,6 @@ router.use(protect);
 
 router.get('/customer/:customerId', getCustomerMeasurements);
 router.post('/customer/:customerId', saveCustomerMeasurements);
+router.put('/:measurementId', updateCustomerMeasurement);
 
 module.exports = router;
