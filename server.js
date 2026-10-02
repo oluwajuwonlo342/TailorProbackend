@@ -10,6 +10,10 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 
 const app = express();
 
+// Render (and most hosts) put a proxy in front of the app. Without this, every visitor
+// appears to come from the proxy's IP, so the rate limiter below would count ALL users together.
+app.set('trust proxy', 1);
+
 // Security Middleware
 app.use(helmet());
 
@@ -31,6 +35,8 @@ app.use(cors({
   credentials: true,
 }));
 
+// JSON bodies only. Portfolio photo uploads are multipart/form-data (handled by multer
+// in the portfolio routes), so this 10kb limit does not affect them.
 app.use(express.json({ limit: '10kb' }));
 
 // Log every request so you can see whether it reaches this server
@@ -65,11 +71,35 @@ app.use('/api', (req, res) => {
 });
 
 // Global Error Handler
+// The frontend reads `err.response.data.error`, so every error response includes both
+// `error` and `message` (message kept for anything already relying on it).
 app.use((err, req, res, next) => {
   console.error('GLOBAL ERROR:', err);
-  res.status(err.statusCode || err.http_code || 500).json({
+
+  let statusCode = err.statusCode || err.http_code || 500;
+  let message = err.message || err.error?.message || 'Something went wrong. Please try again.';
+
+  // Friendly messages for photo upload problems (multer)
+  if (err.name === 'MulterError') {
+    statusCode = 400;
+    if (err.code === 'LIMIT_FILE_SIZE') message = 'One of your photos is too large. Please use images under 5MB.';
+    else if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') message = 'Too many photos selected. Please upload fewer images at a time.';
+  }
+
+  // Bad input that Mongoose rejects (e.g. an invalid gender/category value or a bad number)
+  if (err.name === 'ValidationError' && err.errors) {
+    statusCode = 400;
+    message = Object.values(err.errors).map((e) => e.message).join(' ');
+  }
+  if (err.name === 'CastError') {
+    statusCode = 400;
+    message = `Invalid value for "${err.path}".`;
+  }
+
+  res.status(statusCode).json({
     status: 'error',
-    message: err.message || err.error?.message || 'Something went wrong. Please try again.',
+    error: message,
+    message,
   });
 });
 
