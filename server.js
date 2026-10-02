@@ -57,6 +57,7 @@ app.use('/api/measurements', require('./routes/measurementRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/contact', require('./routes/contactRoutes'));
+app.use('/api/portfolio', require('./routes/portfolioRoutes'));
 
 // Unknown API routes (MUST BE BELOW ALL OTHER ROUTES)
 app.use('/api', (req, res) => {
