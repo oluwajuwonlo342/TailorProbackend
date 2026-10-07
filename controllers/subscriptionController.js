@@ -6,7 +6,7 @@ exports.initializePayment = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: 'User not found.' });
 
-    const amount = 350000; // ₦3,500 in kobo
+    const amount = 150000; // ₦1,500 in kobo
 
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
@@ -55,9 +55,19 @@ exports.verifyPayment = async (req, res) => {
     console.log('Paystack Payment Status:', paymentData.status);
 
     if (paymentData.status === 'success') {
+      // Guard: make sure the amount actually charged matches what we expect,
+      // so a tampered or stale reference can't upgrade an account for free/less
+      const expectedAmount = 150000; // ₦1,500 in kobo
+      if (paymentData.amount !== expectedAmount) {
+        console.log(
+          `Amount mismatch. Expected ${expectedAmount}, got ${paymentData.amount}`
+        );
+        return res.status(400).json({ error: 'Payment amount does not match the expected subscription price.' });
+      }
+
       // FIX: Use the securely authenticated user's ID directly!
-      const userId = req.user._id; 
-      
+      const userId = req.user._id;
+
       if (!userId) {
          console.log('No logged-in user found for this request');
          return res.status(404).json({ error: 'User session not found.' });
