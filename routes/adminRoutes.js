@@ -22,8 +22,8 @@ router.get('/dashboard-stats', protect, async (req, res) => {
 
     const totalTailors = await User.countDocuments({ role: 'user' });
     const activeSubscriptions = await User.countDocuments({ subscriptionStatus: 'pro' });
-    
-    const PRO_PLAN_PRICE = 3500;
+
+    const PRO_PLAN_PRICE = 1500;
     const revenue = activeSubscriptions * PRO_PLAN_PRICE;
 
     // NEW: Fetch the 5 most recently registered tailors
@@ -86,7 +86,7 @@ router.delete('/tailors/:id', protect, async (req, res) => {
 
     // 4. Execute deletion
     await User.findByIdAndDelete(tailorId);
-    
+
     res.status(200).json({ message: 'Tailor successfully removed from the platform.' });
   } catch (error) {
     console.error('Delete Tailor Error:', error);
@@ -102,13 +102,13 @@ router.get('/tailors/:id', protect, async (req, res) => {
     }
 
     const tailor = await User.findById(req.params.id).select('-password');
-    
+
     if (!tailor) {
       return res.status(404).json({ error: 'Tailor account not found.' });
     }
 
     // Replace the placeholders by dynamically counting the real documents.
-    // Note: If your schemas use a different field name linking them to the tailor 
+    // Note: If your schemas use a different field name linking them to the tailor
     // (like 'tailorId' instead of 'user'), update the field name below!
     const totalCustomers = await Customer.countDocuments({ user: tailor._id });
     const totalOrders = await Order.countDocuments({ user: tailor._id });
@@ -134,7 +134,7 @@ router.put('/tailors/:id/suspend', protect, async (req, res) => {
     }
 
     const tailor = await User.findById(req.params.id);
-    
+
     if (!tailor) {
       return res.status(404).json({ error: 'Tailor account not found.' });
     }
@@ -147,9 +147,9 @@ router.put('/tailors/:id/suspend', protect, async (req, res) => {
     tailor.isSuspended = !tailor.isSuspended;
     await tailor.save();
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: `Account successfully ${tailor.isSuspended ? 'suspended' : 'reactivated'}.`,
-      isSuspended: tailor.isSuspended 
+      isSuspended: tailor.isSuspended
     });
   } catch (error) {
     console.error('Suspend Tailor Error:', error);
@@ -165,7 +165,7 @@ router.put('/tailors/:id/reset-password', protect, async (req, res) => {
     }
 
     const tailor = await User.findById(req.params.id);
-    
+
     if (!tailor) {
       return res.status(404).json({ error: 'Tailor account not found.' });
     }
@@ -176,18 +176,18 @@ router.put('/tailors/:id/reset-password', protect, async (req, res) => {
 
     // 1. Generate a random 8-character hex password (e.g., 'a1b2c3d4')
     const generatedPassword = crypto.randomBytes(4).toString('hex');
-    
+
     // 2. Hash the new password securely
     const salt = await bcrypt.genSalt(10);
     tailor.password = await bcrypt.hash(generatedPassword, salt);
-    
+
     // 3. Save the updated user document
     await tailor.save();
 
     // 4. Return the plain text password so the Super Admin can copy it
-    res.status(200).json({ 
+    res.status(200).json({
       message: 'Password reset successfully.',
-      newPassword: generatedPassword 
+      newPassword: generatedPassword
     });
   } catch (error) {
     console.error('Reset Password Error:', error);
@@ -205,9 +205,9 @@ router.get('/subscriptions', protect, async (req, res) => {
     // 1. Calculate metrics using the 'plan' field to match your schema
     const totalPro = await User.countDocuments({ plan: 'pro', role: 'user' });
     const totalFree = await User.countDocuments({ plan: 'free', role: 'user' });
-    
-    // Assuming PRO plan costs ₦5,000/month
-    const PRO_PLAN_PRICE = 3500; 
+
+    // PRO plan costs ₦1,500/month
+    const PRO_PLAN_PRICE = 1500;
     const monthlyRevenue = totalPro * PRO_PLAN_PRICE;
 
     // 2. Fetch the list of tailors with their correct subscription fields
@@ -252,7 +252,7 @@ router.put('/subscriptions/:id/toggle', protect, async (req, res) => {
 
     await tailor.save();
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: 'Subscription updated successfully.',
       plan: tailor.plan,
       subscriptionStatus: tailor.subscriptionStatus
@@ -273,7 +273,7 @@ router.get('/overview', protect, async (req, res) => {
     // 1. Calculate top-level metrics
     const totalTailors = await User.countDocuments({ role: 'user' });
     const proTailors = await User.countDocuments({ role: 'user', plan: 'pro' });
-    const mrr = proTailors * 3500; // ₦5,000/month PRO plan
+    const mrr = proTailors * 1500; // ₦1,500/month PRO plan
 
     // 2. Fetch the 5 most recent registrations
     const recentTailors = await User.find({ role: 'user' })
