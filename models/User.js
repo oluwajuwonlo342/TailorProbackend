@@ -1,30 +1,39 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { TRIAL_DAYS } = require('../config/plans');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const userSchema = new mongoose.Schema({
-  fullName: { type: String, required: true },
-  businessName: { type: String, required: true },
-  email: { type: String, required: true, unique: true, lowercase: true },
-  phone: { type: String, required: true },
+  fullName: { type: String, required: true, trim: true, maxlength: 80 },
+  businessName: { type: String, required: true, trim: true, maxlength: 80 },
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  phone: { type: String, required: true, trim: true },
   address: { type: String, trim: true, default: '' },
   profilePhoto: { type: String, default: '' },
   password: { type: String, required: true, select: false },
   role: { type: String, enum: ['user', 'admin'], default: 'user' },
-// Add this inside your UserSchema definition:
-isSuspended: {
-  type: Boolean,
-  default: false
-},
+  isSuspended: { type: Boolean, default: false },
+
   // Subscription & SaaS logic
   plan: { type: String, enum: ['free', 'pro'], default: 'free' },
   subscriptionStatus: { type: String, enum: ['trial', 'active', 'expired', 'cancelled', 'free'], default: 'trial' },
   trialStart: { type: Date, default: Date.now },
   trialEnd: {
     type: Date,
-    default: () => new Date(+new Date() + 14 * 24 * 60 * 60 * 1000) // 14 days from now
+    default: () => new Date(Date.now() + TRIAL_DAYS * DAY_MS)
   },
   subscriptionEnd: { type: Date },
 }, { timestamps: true });
+
+// Safety net: never include the password hash or __v if a user document is ever sent as JSON
+userSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    delete ret.password;
+    delete ret.__v;
+    return ret;
+  }
+});
 
 // Password hashing
 userSchema.pre('save', async function () {
