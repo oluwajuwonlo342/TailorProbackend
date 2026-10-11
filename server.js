@@ -45,13 +45,48 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate Limiting (relaxed in development so testing doesn't lock you out)
-const limiter = rateLimit({
-  max: process.env.NODE_ENV === 'production' ? 100 : 1000,
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+const isProd = process.env.NODE_ENV === 'production';
+
+const makeLimiter = ({ max, windowMs, message, skipSuccessfulRequests = false }) =>
+  rateLimit({
+    max,
+    windowMs,
+    message: { status: 'error', error: message, message },
+    skipSuccessfulRequests,
+  });
+
+// General limit for the whole API (relaxed in development so testing doesn't lock you out)
+app.use('/api', makeLimiter({
+  max: isProd ? 600 : 5000,
   windowMs: 60 * 60 * 1000,
-  message: { error: 'Too many requests from this IP, please try again in an hour!' },
+  message: 'Too many requests from this IP, please try again in an hour!',
+}));
+
+// Strict limits on the endpoints attackers and bots target.
+// Successful logins are not counted, so real users never get locked out for logging in normally.
+const loginLimiter = makeLimiter({
+  max: isProd ? 10 : 100,
+  windowMs: 15 * 60 * 1000,
+  message: 'Too many login attempts. Please try again in 15 minutes.',
+  skipSuccessfulRequests: true,
 });
-app.use('/api', limiter);
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/admin/login', loginLimiter);
+
+app.use('/api/auth/register', makeLimiter({
+  max: isProd ? 10 : 100,
+  windowMs: 60 * 60 * 1000,
+  message: 'Too many accounts created from this IP. Please try again later.',
+}));
+
+app.use('/api/contact', makeLimiter({
+  max: isProd ? 10 : 100,
+  windowMs: 60 * 60 * 1000,
+  message: 'Too many messages sent. Please try again later.',
+}));
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
@@ -78,6 +113,18 @@ app.use((err, req, res, next) => {
 
   let statusCode = err.statusCode || err.http_code || 500;
   let message = err.message || err.error?.message || 'Something went wrong. Please try again.';
+
+  // Request came from a website that isn't on the allowlist
+  if (err.message === 'Not allowed by CORS') {
+    statusCode = 403;
+    message = 'This website is not allowed to use the API.';
+  }
+
+  // JSON body bigger than the 10kb limit
+  if (err.type === 'entity.too.large') {
+    statusCode = 413;
+    message = 'The submitted data is too large.';
+  }
 
   // Friendly messages for photo upload problems (multer)
   if (err.name === 'MulterError') {
