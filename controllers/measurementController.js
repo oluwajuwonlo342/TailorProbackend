@@ -1,12 +1,19 @@
 const Measurement = require('../models/Measurement');
 const Customer = require('../models/Customer');
-const User = require('../models/User');
+const { cleanMeasurementFields, cleanText, MAX_FIELDS } = require('../utils/sanitize');
+const { hasProAccess } = require('../utils/proAccess');
+
+const pickUnit = (unit) => (unit === 'cm' ? 'cm' : 'inches');
+const pickGender = (gender, fallback) =>
+  ['Male', 'Female', 'Unisex'].includes(gender) ? gender : fallback;
+const asObject = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 
 // ==========================================================
 // PUBLIC LINK CONTROLLERS (For WhatsApp Shared Links)
 // ==========================================================
 
-// Verify the public link and get basic customer/tailor info
+// Returns only what the public form needs. Nothing private (phone, email, address, notes).
 exports.verifyPublicLink = async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.token).populate('user', 'businessName fullName');
@@ -16,11 +23,21 @@ exports.verifyPublicLink = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      customer,
+      customer: {
+        _id: customer._id,
+        fullName: customer.fullName,
+        gender: customer.gender,
+        subProfiles: customer.subProfiles.map((sp) => ({
+          _id: sp._id,
+          name: sp.name,
+          relationship: sp.relationship,
+          gender: sp.gender
+        }))
+      },
       tailorName: customer.user.businessName || customer.user.fullName
     });
   } catch (error) {
-    console.error("PUBLIC LINK VERIFICATION ERROR:", error);
+    console.error('PUBLIC LINK VERIFICATION ERROR:', error);
     res.status(404).json({ error: 'Invalid or expired link.' });
   }
 };
@@ -28,25 +45,22 @@ exports.verifyPublicLink = async (req, res) => {
 // Handle the form submission from the public link
 exports.submitPublicMeasurement = async (req, res) => {
   try {
-    const customerId = req.params.token;
-    const customer = await Customer.findById(customerId);
-
+    const customer = await Customer.findById(req.params.token);
     if (!customer) {
       return res.status(404).json({ error: 'Invalid or expired link.' });
     }
 
-    // 1. Pull out the routing data, and capture EVERYTHING else as flat measurements
-    const { subProfileId, targetType, unit, gender, measurementsData, ...flatMeasurements } = req.body;
+    const { subProfileId, targetType, unit, gender, title, measurementsData, ...flat } = req.body;
 
-    // 2. Automatically detect where the numbers are (nested vs flat)
-    const finalMeasurements = (measurementsData && Object.keys(measurementsData).length > 0)
-      ? measurementsData
-      : flatMeasurements;
-
-    // 3. Guard against empty submissions (e.g. network retry with no body)
-    if (!finalMeasurements || Object.keys(finalMeasurements).length === 0) {
-      return res.status(400).json({ error: 'No measurement values were submitted.' });
+    // Accept both the flat shape and the older nested shape, keeping only safe keys and values
+    const fields = cleanMeasurementFields({ ...flat, ...asObject(measurementsData) });
+    const count = Object.keys(fields).length;
+    if (count === 0 || count > MAX_FIELDS) {
+      return res.status(400).json({ error: `Please submit between 1 and ${MAX_FIELDS} measurement values.` });
     }
+
+    const recordTitle = cleanText(title, 80) || 'WhatsApp Self-Measurement';
+    const safeUnit = pickUnit(unit);
 
     if (targetType === 'subProfile' && subProfileId) {
       const subProfile = customer.subProfiles.id(subProfileId);
@@ -54,29 +68,23 @@ exports.submitPublicMeasurement = async (req, res) => {
         return res.status(404).json({ error: 'Sub-profile not found.' });
       }
 
-      subProfile.measurements.push({
-        title: 'WhatsApp Self-Measurement',
-        unit: unit || 'inches',
-        ...finalMeasurements
-      });
-      subProfile.gender = gender || subProfile.gender;
+      // Public links must never edit profile details, so the sub-profile's gender is left alone
+      subProfile.measurements.unshift({ ...fields, title: recordTitle, unit: safeUnit });
       await customer.save();
     } else {
       await Measurement.create({
-        customer: customerId,
-        user: customer.user,
-        unit: unit || 'inches',
-        // Use the gender the form was actually filled out for (Male/Female field set),
-        // falling back to the customer's stored gender only if the form didn't send one
-        gender: gender || customer.gender,
-        title: 'WhatsApp Self-Measurement',
-        ...finalMeasurements
+        title: recordTitle,
+        unit: safeUnit,
+        gender: pickGender(gender, customer.gender),
+        measurementsData: fields,
+        customer: customer._id,
+        user: customer.user // taken from the customer, never from the request
       });
     }
 
     res.status(201).json({ success: true, message: 'Measurements submitted successfully.' });
   } catch (error) {
-    console.error("PUBLIC SUBMISSION ERROR:", error);
+    console.error('PUBLIC SUBMISSION ERROR:', error);
     res.status(500).json({ error: 'Failed to submit measurements. Please try again.' });
   }
 };
@@ -95,12 +103,12 @@ exports.getCustomerMeasurements = async (req, res) => {
     const measurements = await Measurement.find({ customer: customerId, user: req.user._id }).sort('-createdAt');
     res.status(200).json({ status: 'success', results: measurements.length, data: measurements });
   } catch (error) {
-    console.error("GET MEASUREMENTS ERROR:", error);
+    console.error('GET MEASUREMENTS ERROR:', error);
     res.status(500).json({ error: 'Server Error' });
   }
 };
 
-// Save measurement history directly from the dashboard
+// Save a new measurement record from the dashboard
 exports.saveCustomerMeasurements = async (req, res) => {
   try {
     const { customerId } = req.params;
@@ -110,104 +118,86 @@ exports.saveCustomerMeasurements = async (req, res) => {
       return res.status(404).json({ error: 'Customer not found.' });
     }
 
-    // Pull out known fields, allowing any extra fields to be captured dynamically
-    const { _id, title, unit, gender, recordedDate, createdAt, updatedAt, notes, measurementsData, ...dynamicFields } = req.body;
-
-    // Combine any existing measurementsData with any flat dynamic fields submitted
-    const finalMeasurementsData = {
-      ...(measurementsData || {}),
-      ...dynamicFields
-    };
-
-    const hasAtLeastOneValue = Object.values(finalMeasurementsData).some(
-      (v) => v !== undefined && v !== null && v !== ''
-    );
-    if (!hasAtLeastOneValue && !title && !notes) {
+    const { title, unit, gender, notes, measurementsData, ...rest } = req.body;
+    const fields = cleanMeasurementFields({ ...rest, ...asObject(measurementsData) });
+    const count = Object.keys(fields).length;
+    if (count === 0) {
       return res.status(400).json({ error: 'Please fill in at least one measurement before saving.' });
     }
+    if (count > MAX_FIELDS) {
+      return res.status(400).json({ error: `A record can have at most ${MAX_FIELDS} measurements.` });
+    }
 
-    // Check if customer already has a measurement record
+    // Free users keep one record per customer; history is a Pro feature
     const existingCount = await Measurement.countDocuments({ customer: customerId, user: req.user._id });
-
-    if (existingCount > 0) {
-      const user = await User.findById(req.user._id);
-      const isPro = user.plan?.toLowerCase() === 'pro' || (user.trialEnd && new Date(user.trialEnd) > new Date());
-
-      if (!isPro) {
-        return res.status(403).json({
-          error: 'Measurement history is a Pro feature. Upgrade to Pro to save multiple measurement records for the same customer over time.'
-        });
-      }
+    if (existingCount > 0 && !hasProAccess(req.user)) {
+      return res.status(403).json({
+        error: 'Measurement history is a Pro feature. Upgrade to Pro to save multiple measurement records for the same customer over time.'
+      });
     }
 
     const newMeasurement = await Measurement.create({
-      title,
-      unit,
-      gender: gender || customer.gender,
-      notes,
-      measurementsData: finalMeasurementsData,
+      title: cleanText(title, 80) || 'Custom Style',
+      unit: pickUnit(unit),
+      gender: pickGender(gender, customer.gender),
+      notes: cleanText(notes, 500) || undefined,
+      measurementsData: fields,
       customer: customerId,
       user: req.user._id
     });
 
-    res.status(201).json({
-      status: 'success',
-      data: newMeasurement
-    });
+    res.status(201).json({ status: 'success', data: newMeasurement });
   } catch (error) {
-    console.error("SAVE MEASUREMENTS ERROR:", error);
+    console.error('SAVE MEASUREMENTS ERROR:', error);
     res.status(400).json({ error: error.message || 'Failed to save measurements.' });
   }
 };
 
+// Keys that describe the record itself; anything else at the top level is a stray measurement part
+const STRUCTURAL_KEYS = [
+  '_id', '__v', 'user', 'customer', 'subProfileId', 'targetType', 'title', 'unit',
+  'gender', 'notes', 'recordedDate', 'measurementsData', 'createdAt', 'updatedAt'
+];
+
 // Update an EXISTING measurement record in place (edit, not a new history entry)
 exports.updateCustomerMeasurement = async (req, res) => {
   try {
-    const { measurementId } = req.params;
-
-    const measurement = await Measurement.findOne({ _id: measurementId, user: req.user._id });
+    const measurement = await Measurement.findOne({ _id: req.params.measurementId, user: req.user._id });
     if (!measurement) {
       return res.status(404).json({ error: 'Measurement record not found.' });
     }
 
-    const { _id, customer, user, createdAt, updatedAt, recordedDate, measurementsData, title, unit, gender, notes, ...dynamicFields } = req.body;
-
-    const finalMeasurementsData = {
-      ...(measurementsData || {}),
-      ...dynamicFields
-    };
-
-    const hasAtLeastOneValue = Object.values(finalMeasurementsData).some(
-      (v) => v !== undefined && v !== null && v !== ''
-    );
-    if (!hasAtLeastOneValue) {
+    const { title, unit, notes, measurementsData, ...rest } = req.body;
+    const fields = cleanMeasurementFields({ ...rest, ...asObject(measurementsData) });
+    const count = Object.keys(fields).length;
+    if (count === 0) {
       return res.status(400).json({ error: 'Please fill in at least one measurement before saving.' });
     }
+    if (count > MAX_FIELDS) {
+      return res.status(400).json({ error: `A record can have at most ${MAX_FIELDS} measurements.` });
+    }
 
-    if (title) measurement.title = title;
-    if (unit) measurement.unit = unit;
-    if (notes !== undefined) measurement.notes = notes;
+    const newTitle = cleanText(title, 80);
+    if (newTitle) measurement.title = newTitle;
+    if (unit) measurement.unit = pickUnit(unit);
+    if (notes !== undefined) measurement.notes = cleanText(notes, 500);
 
-    // Replace the measurementsData object entirely (rather than merging) so
-    // a part removed in the edit form is actually dropped from the record.
-    measurement.measurementsData = finalMeasurementsData;
+    // Replace the parts entirely so a part removed in the edit form is really gone
+    measurement.measurementsData = fields;
 
-    // Clear any legacy top-level predefined fields (neck, shoulder, etc.) left over
-    // from the old hardcoded form, so an edit fully replaces old data cleanly.
-    const predefinedKeys = [
-      'neck', 'shoulder', 'chest', 'waist', 'armHole', 'sleeveLength', 'bicep', 'wrist', 'topLength',
-      'bust', 'underBust', 'shoulderToNipple', 'shoulderToUnderBust', 'halfLength', 'gownLength',
-      'trouserWaist', 'hips', 'thigh', 'knee', 'calf', 'instep', 'trouserLength', 'inseam', 'skirtLength'
-    ];
-    predefinedKeys.forEach((key) => {
-      measurement.set(key, undefined);
+    // Records saved before this fix (public submissions, old fixed fields) keep parts as
+    // top-level keys. Clear them so removed parts can't reappear.
+    Object.keys(measurement.toObject()).forEach((key) => {
+      if (!STRUCTURAL_KEYS.includes(key)) {
+        measurement.set(key, undefined, { strict: false });
+      }
     });
 
     await measurement.save();
 
     res.status(200).json({ status: 'success', data: measurement });
   } catch (error) {
-    console.error("UPDATE MEASUREMENT ERROR:", error);
+    console.error('UPDATE MEASUREMENT ERROR:', error);
     res.status(400).json({ error: error.message || 'Failed to update measurement.' });
   }
 };
