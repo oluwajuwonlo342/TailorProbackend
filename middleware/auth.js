@@ -29,14 +29,19 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ error: 'The user belonging to this token no longer exists.' });
     }
 
-    // 4. Instantly kick out active users if an admin suspended their account
+    // 4. Reject sessions that started before the password was last reset
+    if (req.user.passwordChangedAt && decoded.iat * 1000 < req.user.passwordChangedAt.getTime()) {
+      return res.status(401).json({ error: 'Your password was changed. Please log in again.' });
+    }
+
+    // 5. Instantly kick out active users if an admin suspended their account
     if (req.user.isSuspended) {
       return res.status(403).json({
         error: 'Your account has been suspended. Please contact the platform administrator.'
       });
     }
 
-    // 5. Downgrade expired plans automatically
+    // 6. Downgrade expired plans automatically
     const now = new Date();
     let downgraded = false;
 
@@ -62,7 +67,7 @@ const protect = async (req, res, next) => {
       );
     }
 
-    // 6. Grant access to the protected route
+    // 7. Grant access to the protected route
     next();
   } catch (error) {
     console.error('Auth Middleware Error:', error);
