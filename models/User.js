@@ -15,6 +15,11 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ['user', 'admin'], default: 'user' },
   isSuspended: { type: Boolean, default: false },
 
+  // Password reset (only a hash of the emailed token is stored)
+  passwordResetToken: { type: String, select: false },
+  passwordResetExpires: { type: Date, select: false },
+  passwordChangedAt: { type: Date },
+
   // Subscription & SaaS logic
   plan: { type: String, enum: ['free', 'pro'], default: 'free' },
   subscriptionStatus: { type: String, enum: ['trial', 'active', 'expired', 'cancelled', 'free'], default: 'trial' },
@@ -26,10 +31,12 @@ const userSchema = new mongoose.Schema({
   subscriptionEnd: { type: Date },
 }, { timestamps: true });
 
-// Safety net: never include the password hash or __v if a user document is ever sent as JSON
+// Safety net: never include secrets if a user document is ever sent as JSON
 userSchema.set('toJSON', {
   transform: (doc, ret) => {
     delete ret.password;
+    delete ret.passwordResetToken;
+    delete ret.passwordResetExpires;
     delete ret.__v;
     return ret;
   }
