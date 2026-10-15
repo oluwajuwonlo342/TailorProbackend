@@ -82,6 +82,19 @@ app.use('/api/auth/register', makeLimiter({
   message: 'Too many accounts created from this IP. Please try again later.',
 }));
 
+// Password reset: limits how many emails one IP can trigger, and how many link guesses it can make
+app.use('/api/auth/forgot-password', makeLimiter({
+  max: isProd ? 5 : 100,
+  windowMs: 60 * 60 * 1000,
+  message: 'Too many reset requests. Please try again later.',
+}));
+
+app.use('/api/auth/reset-password', makeLimiter({
+  max: isProd ? 10 : 100,
+  windowMs: 60 * 60 * 1000,
+  message: 'Too many attempts. Please try again later.',
+}));
+
 app.use('/api/contact', makeLimiter({
   max: isProd ? 10 : 100,
   windowMs: 60 * 60 * 1000,
