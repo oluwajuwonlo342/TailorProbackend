@@ -166,7 +166,7 @@ exports.forgotPassword = async (req, res) => {
         }
       );
 
-      const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+      const frontendUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
       const link = `${frontendUrl}/reset-password/${token}`;
 
       try {
